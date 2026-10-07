@@ -1,13 +1,14 @@
 """跨海光缆故障与抢修协调领域规则与状态转换。"""
-from typing import Any, Dict, Iterable, Tuple
+from typing import Any, Dict, Iterable, List, Tuple
 
-from .domain import Actor, Conflict, ValidationError, boolean, choice, integer, number, text, text_list
+from .domain import Actor, Conflict, ValidationError, boolean, choice, integer, number, optional_text, parse_time, text, text_list
 
 
 INITIAL_STATE = "detected"
 CREATE_ROLES = {'noc_operator'}
 ACTION_ROLES = {'approve': {'repair_manager'}, 'mobilize': {'vessel_master'}, 'survey': {'cable_engineer'}, 'splice': {'cable_engineer'}, 'test': {'noc_operator'}, 'restore': {'noc_operator', 'repair_manager'}, 'cancel': {'repair_manager'}}
 TRANSITIONS = {'approve': {'detected': 'approved'}, 'mobilize': {'approved': 'mobilized'}, 'survey': {'mobilized': 'surveyed'}, 'splice': {'surveyed': 'spliced'}, 'test': {'spliced': 'tested'}, 'restore': {'tested': 'restored'}, 'cancel': {'detected': 'cancelled', 'approved': 'cancelled', 'mobilized': 'cancelled'}}
+DELEGABLE_PHASES = ['approve', 'mobilize', 'survey', 'splice', 'test', 'restore']
 
 
 class DomainRules:
@@ -25,10 +26,17 @@ class DomainRules:
     def role_can_action(self, role: str, action: str) -> bool:
         return role == "admin" or role in ACTION_ROLES.get(action, set())
 
+    def role_can_delegate(self, role: str) -> bool:
+        return role == "admin" or role == "repair_manager"
+
+    def role_can_revoke(self, role: str) -> bool:
+        return role == "admin"
+
     def validate_create(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         p = dict(payload)
         text(p, "cable")
         text(p, "segment")
+        optional_text(p, "jurisdiction_org")
         start = number(p, "start_km", 0)
         end = number(p, "end_km", 0)
         number(p, "depth_m", 1)
@@ -49,6 +57,27 @@ class DomainRules:
         p["estimated_repair_hours"] = round(distance / 2.0 + float(p["depth_m"]) / 100.0 + int(p["sea_state"]) * 2.0, 2)
         p["repair_feasible"] = bool(p["vessel_available"] and p["permit_valid"] and p["spare_length_km"] >= p["required_spare_km"] and int(p["sea_state"]) <= 5)
         return p
+
+    def validate_delegation(self, payload: Dict[str, Any], now) -> Dict[str, Any]:
+        data = dict(payload or {})
+        to_org = text(data, "to_org")
+        phases: List[str] = []
+        for phase in text_list(data, "phases", minimum=1):
+            if phase not in DELEGABLE_PHASES:
+                raise ValidationError("阶段%s不可委托" % phase)
+            if phase not in phases:
+                phases.append(phase)
+        valid_from = parse_time(data, "valid_from", default=now)
+        valid_until = parse_time(data, "valid_until")
+        if valid_until <= valid_from:
+            raise ValidationError("委托生效期结束必须晚于开始")
+        return {
+            "to_org": to_org,
+            "phases": phases,
+            "valid_from": valid_from.isoformat(),
+            "valid_until": valid_until.isoformat(),
+            "reason": optional_text(data, "reason"),
+        }
 
     def check_create_conflicts(self, payload: Dict[str, Any], existing: Iterable[Dict[str, Any]]) -> None:
         for item in existing:

@@ -21,12 +21,19 @@ def make_handler(service: Any, static_dir: Path):
         def log_message(self, fmt: str, *args: Any) -> None:
             return
 
+        @staticmethod
+        def _header_text(value: str) -> str:
+            try:
+                return value.encode("latin-1").decode("utf-8")
+            except (UnicodeEncodeError, UnicodeDecodeError):
+                return value
+
         def _actor(self) -> Actor:
-            user_id = self.headers.get("X-User-Id", "").strip()
-            role = self.headers.get("X-Role", "").strip()
+            user_id = self._header_text(self.headers.get("X-User-Id", "")).strip()
+            role = self._header_text(self.headers.get("X-Role", "")).strip()
             if not user_id or not role:
                 raise PermissionDenied("缺少X-User-Id或X-Role")
-            return Actor(user_id=user_id, role=role, organization=self.headers.get("X-Org", ""))
+            return Actor(user_id=user_id, role=role, organization=self._header_text(self.headers.get("X-Org", "")))
 
         def _body(self) -> Dict[str, Any]:
             try:
@@ -57,7 +64,10 @@ def make_handler(service: Any, static_dir: Path):
 
         def _handle_error(self, exc: Exception) -> None:
             if isinstance(exc, DomainError):
-                self._send(exc.status, {"error": exc.code, "message": str(exc)})
+                payload: Dict[str, Any] = {"error": exc.code, "message": str(exc)}
+                if exc.details:
+                    payload["details"] = exc.details
+                self._send(exc.status, payload)
             else:
                 self._send(500, {"error": "internal_error", "message": "服务内部错误"})
 

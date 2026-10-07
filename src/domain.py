@@ -1,11 +1,16 @@
 """领域基础类型与输入校验。"""
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 
 class DomainError(Exception):
     status = 400
     code = "domain_error"
+
+    def __init__(self, message: str = "", details: Dict[str, Any] = None) -> None:
+        super().__init__(message)
+        self.details = details or {}
 
 
 class ValidationError(DomainError):
@@ -95,3 +100,20 @@ def text_list(data: Dict[str, Any], key: str, minimum: int = 0) -> List[str]:
     if len(value) < minimum:
         raise ValidationError("%s至少需要%s项" % (key, minimum))
     return [item.strip() for item in value]
+
+
+def parse_time(data: Dict[str, Any], key: str, default: datetime = None) -> datetime:
+    value = data.get(key)
+    if value is None or (isinstance(value, str) and not value.strip()):
+        if default is not None:
+            return default
+        raise ValidationError("%s不能为空" % key)
+    if not isinstance(value, str):
+        raise ValidationError("%s必须是ISO时间文本" % key)
+    try:
+        moment = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValidationError("%s时间格式无效" % key) from exc
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(timezone.utc)

@@ -3,31 +3,382 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>跨海光缆故障与抢修协调</title>
+  <title>跨分局协同台 · 跨海光缆故障抢修</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; color: #17212b; }
-    main { max-width: 960px; margin: auto; }
-    button { padding: .55rem .9rem; cursor: pointer; }
-    pre { background: #f4f6f8; padding: 1rem; overflow: auto; border-radius: 8px; }
-    .row { display: flex; gap: 1rem; align-items: center; }
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; color: #17212b; background: #eef1f5; }
+    header { background: #12365c; color: #fff; padding: .8rem 1.2rem; display: flex; flex-wrap: wrap; gap: .8rem; align-items: center; }
+    header h1 { font-size: 1.05rem; margin: 0 auto 0 0; }
+    header label { font-size: .8rem; display: flex; flex-direction: column; gap: .2rem; }
+    header input, header select { padding: .3rem .45rem; border-radius: 5px; border: 1px solid #9db4cc; font-size: .85rem; }
+    .presets button { background: #2a5c8f; color: #fff; border: 0; border-radius: 5px; padding: .35rem .6rem; font-size: .78rem; cursor: pointer; }
+    main { display: grid; grid-template-columns: 380px 1fr; gap: 1rem; padding: 1rem; max-width: 1440px; margin: auto; align-items: start; }
+    section { background: #fff; border-radius: 10px; padding: 1rem; box-shadow: 0 1px 3px rgba(16,42,67,.08); }
+    h2 { font-size: .95rem; margin: 0 0 .7rem; color: #12365c; border-bottom: 2px solid #e3ebf3; padding-bottom: .4rem; }
+    h3 { font-size: .85rem; margin: 1rem 0 .4rem; color: #34506e; }
+    label.f { display: flex; flex-direction: column; gap: .15rem; font-size: .75rem; color: #4a5f76; }
+    input, select, textarea { padding: .35rem .5rem; border: 1px solid #c3cfdb; border-radius: 6px; font-size: .85rem; font-family: inherit; }
+    textarea { font-family: ui-monospace, Menlo, monospace; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+    .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: .5rem; }
+    button { padding: .5rem .9rem; cursor: pointer; border: 0; border-radius: 6px; background: #1c6fb8; color: #fff; font-size: .85rem; }
+    button.ghost { background: #e3ebf3; color: #1c3d5a; }
+    button.warn { background: #b8541c; }
+    button.danger { background: #b31c1c; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+    th, td { text-align: left; padding: .35rem .4rem; border-bottom: 1px solid #e8edf2; vertical-align: top; }
+    th { color: #5a7186; font-weight: 600; }
+    tr.clickable { cursor: pointer; }
+    tr.clickable:hover { background: #f2f7fc; }
+    tr.active { background: #e2f0fc; }
+    .badge { display: inline-block; padding: .1rem .5rem; border-radius: 999px; font-size: .72rem; background: #e3ebf3; color: #1c3d5a; margin: .1rem .15rem .1rem 0; }
+    .badge.jurisdiction { background: #dceadff9; color: #1e5c2e; }
+    .badge.entrusted { background: #fdeccb; color: #8a5a00; }
+    .badge.state { background: #dbe7f6; }
+    .badge.closed { background: #eee; color: #777; }
+    .msg { font-size: .82rem; padding: .5rem .7rem; border-radius: 6px; margin: .5rem 0; display: none; }
+    .msg.ok { display: block; background: #e2f4e5; color: #1e5c2e; }
+    .msg.err { display: block; background: #fbe3e3; color: #8f1f1f; }
+    .conflict { display: none; border: 1px solid #e4b740; background: #fdf6e0; border-radius: 8px; padding: .7rem; margin: .6rem 0; font-size: .8rem; }
+    .conflict.show { display: block; }
+    .conflict h4 { margin: 0 0 .4rem; color: #8a5a00; font-size: .85rem; }
+    .conflict dl { display: grid; grid-template-columns: auto 1fr; gap: .15rem .8rem; margin: 0 0 .5rem; }
+    .conflict dt { color: #8a6d1a; } .conflict dd { margin: 0; font-weight: 600; }
+    pre { background: #f4f6f8; padding: .7rem; overflow: auto; border-radius: 8px; font-size: .75rem; max-height: 260px; }
+    .row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin-top: .6rem; }
+    .muted { color: #7a8a99; font-size: .75rem; }
+    .timeline { font-size: .78rem; }
+    .timeline li { margin-bottom: .35rem; }
+    .timeline code { background: #eef2f6; padding: .05rem .3rem; border-radius: 4px; }
+    .phases label { display: inline-flex; gap: .25rem; align-items: center; margin-right: .6rem; font-size: .78rem; }
+    #detail-empty { color: #7a8a99; font-size: .85rem; }
   </style>
 </head>
 <body>
+<header>
+  <h1>跨分局协同台 · 跨海光缆故障抢修</h1>
+  <label>用户<input id="f-user" value="mgr-a"></label>
+  <label>角色
+    <select id="f-role">
+      <option value="noc_operator">noc_operator 网管值班</option>
+      <option value="repair_manager" selected>repair_manager 抢修经理</option>
+      <option value="vessel_master">vessel_master 船长</option>
+      <option value="cable_engineer">cable_engineer 光缆工程师</option>
+      <option value="admin">admin 上级</option>
+    </select>
+  </label>
+  <label>分局
+    <select id="f-org">
+      <option>甲分局</option>
+      <option>乙分局</option>
+      <option>丙分局</option>
+      <option>总部</option>
+    </select>
+  </label>
+  <span class="presets">
+    <button data-p="mgr-a|repair_manager|甲分局">甲·经理</button>
+    <button data-p="eng-b|cable_engineer|乙分局">乙·工程师</button>
+    <button data-p="mgr-b|repair_manager|乙分局">乙·经理</button>
+    <button data-p="hq|admin|总部">总部·上级</button>
+  </span>
+</header>
 <main>
-  <h1>跨海光缆故障与抢修协调</h1>
-  <p>最小演示页。完整业务流程通过README中的JSON接口调用。</p>
-  <div class="row"><button id="load">加载记录</button><button id="stats">查看状态统计</button></div>
-  <pre id="output">点击上方按钮读取服务状态。</pre>
+  <div>
+    <section>
+      <h2>建单（写明管辖分局）</h2>
+      <div class="grid2">
+        <label class="f">工单号<input id="c-reference" value="CABLE-1001"></label>
+        <label class="f">管辖分局<input id="c-jurisdiction"></label>
+        <label class="f">光缆<input id="c-cable" value="SEA-1"></label>
+        <label class="f">区段<input id="c-segment" value="S3"></label>
+        <label class="f">开始里程km<input id="c-start" type="number" value="120"></label>
+        <label class="f">结束里程km<input id="c-end" type="number" value="135"></label>
+        <label class="f">水深m<input id="c-depth" type="number" value="1800"></label>
+        <label class="f">海况等级<input id="c-sea" type="number" value="3"></label>
+        <label class="f">备缆km<input id="c-spare" type="number" value="20"></label>
+        <label class="f">容量Gbps<input id="c-capacity" type="number" value="400"></label>
+      </div>
+      <div class="row">
+        <label><input id="c-vessel" type="checkbox" checked> 船舶可用</label>
+        <label><input id="c-permit" type="checkbox" checked> 许可有效</label>
+      </div>
+      <div class="row"><button id="btn-create">创建工单</button><span class="muted">管辖分局默认取当前分局</span></div>
+      <div class="msg" id="create-msg"></div>
+    </section>
+    <section style="margin-top:1rem">
+      <h2>记录列表（本分局管辖 + 当前受托）</h2>
+      <div class="row" style="margin:0 0 .5rem"><button class="ghost" id="btn-refresh">刷新</button><span class="muted" id="list-hint"></span></div>
+      <table>
+        <thead><tr><th>ID</th><th>工单号</th><th>状态</th><th>管辖</th><th>受托</th><th>v</th></tr></thead>
+        <tbody id="list-body"></tbody>
+      </table>
+    </section>
+  </div>
+  <section>
+    <h2>详情 · 管辖 / 受托 / 交接</h2>
+    <div id="detail-empty">从左侧列表选择一条记录。</div>
+    <div id="detail" style="display:none">
+      <div id="detail-badges"></div>
+      <div class="msg" id="act-msg"></div>
+      <div class="conflict" id="conflict-box">
+        <h4>写入冲突：对方已先行办理，本机原记录已保留</h4>
+        <dl>
+          <dt>提示</dt><dd id="cf-message"></dd>
+          <dt>当前版本</dt><dd id="cf-version"></dd>
+          <dt>当前状态</dt><dd id="cf-state"></dd>
+          <dt>管辖分局</dt><dd id="cf-jurisdiction"></dd>
+          <dt>当前受托方</dt><dd id="cf-entrusted"></dd>
+          <dt>冲突动作</dt><dd id="cf-action"></dd>
+        </dl>
+        <button class="warn" id="btn-retry">保留我的数据，按当前版本重试</button>
+        <span class="muted">换手类操作失败不消耗版本号，可按原版本直接重试。</span>
+      </div>
+      <h3>业务办理</h3>
+      <div class="row" style="margin-top:0">
+        <select id="a-action">
+          <option value="approve">approve 批准方案</option>
+          <option value="mobilize">mobilize 船舶动员</option>
+          <option value="survey">survey 故障勘察</option>
+          <option value="splice">splice 光缆接续</option>
+          <option value="test">test 系统测试</option>
+          <option value="restore">restore 通信恢复</option>
+          <option value="cancel">cancel 取消</option>
+        </select>
+        <label class="f" style="flex-direction:row;align-items:center;gap:.3rem">expected_version <input id="a-version" type="number" style="width:5rem"></label>
+        <button id="btn-act">执行</button>
+      </div>
+      <textarea id="a-data" rows="3" style="width:100%;margin-top:.4rem"></textarea>
+      <h3>阶段委托（抢修经理 / 上级）</h3>
+      <div class="grid3">
+        <label class="f">受托分局
+          <select id="d-to"><option>乙分局</option><option>丙分局</option><option>甲分局</option></select>
+        </label>
+        <label class="f">生效起始<input id="d-from" type="datetime-local"></label>
+        <label class="f">生效截止<input id="d-until" type="datetime-local"></label>
+      </div>
+      <div class="phases" id="d-phases" style="margin-top:.4rem">
+        <label><input type="checkbox" value="approve">approve</label>
+        <label><input type="checkbox" value="mobilize">mobilize</label>
+        <label><input type="checkbox" value="survey" checked>survey</label>
+        <label><input type="checkbox" value="splice" checked>splice</label>
+        <label><input type="checkbox" value="test">test</label>
+        <label><input type="checkbox" value="restore">restore</label>
+      </div>
+      <div class="row">
+        <input id="d-reason" placeholder="委托事由（凭据）" style="flex:1" value="兄弟分局船机就近支援">
+        <button id="btn-delegate">委托</button>
+        <button class="warn" id="btn-return">受托方退回</button>
+        <button class="danger" id="btn-revoke">上级撤回</button>
+      </div>
+      <h3>交接记录</h3>
+      <table>
+        <thead><tr><th>委托方→受托方</th><th>阶段</th><th>生效期</th><th>状态</th><th>凭据/关闭</th></tr></thead>
+        <tbody id="delegation-body"></tbody>
+      </table>
+      <h3>工单数据</h3>
+      <pre id="detail-payload"></pre>
+      <h3>审计时间线</h3>
+      <ol class="timeline" id="timeline"></ol>
+    </div>
+  </section>
 </main>
 <script>
-const headers = {"X-User-Id":"demo-admin","X-Role":"admin","X-Org":"demo"};
-async function show(path) {
-  const response = await fetch(path, {headers});
-  const data = await response.json();
-  document.getElementById("output").textContent = JSON.stringify(data, null, 2);
+const $ = id => document.getElementById(id);
+const ACTION_TEMPLATES = {
+  approve: {repair_manager: "RM-1"},
+  mobilize: {weather_window_hours: 40, available_spare_km: 18, vessel_name: "CS-1"},
+  survey: {survey_complete: true, fault_location_km: 128},
+  splice: {splice_loss_db: 0.12, spare_used_km: 16},
+  test: {end_to_end_loss_db: 0.3},
+  restore: {traffic_restored: true, restore_capacity_gbps: 400},
+  cancel: {cancel_reason: "海况恶化"}
+};
+let current = null;
+
+function identity() {
+  return {"X-User-Id": $("f-user").value.trim(), "X-Role": $("f-role").value, "X-Org": $("f-org").value};
 }
-document.getElementById("load").onclick = () => show("/api/records?limit=20");
-document.getElementById("stats").onclick = () => show("/api/stats");
+async function api(path, options = {}) {
+  const response = await fetch(path, {...options, headers: {...identity(), ...(options.headers || {})}});
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const err = new Error(data.message || ("HTTP " + response.status));
+    err.details = data.details || null;
+    throw err;
+  }
+  return data;
+}
+function toast(el, ok, text) {
+  el.className = "msg " + (ok ? "ok" : "err");
+  el.textContent = text;
+}
+function fmt(t) { return t ? t.replace("T", " ").slice(0, 19) : "—"; }
+function toIso(local) { return local ? new Date(local).toISOString() : ""; }
+function setLocal(id, date) {
+  const pad = n => String(n).padStart(2, "0");
+  $(id).value = date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate()) + "T" + pad(date.getHours()) + ":" + pad(date.getMinutes());
+}
+
+async function loadList() {
+  try {
+    const data = await api("/api/records?limit=100");
+    $("list-hint").textContent = "可见 " + data.items.length + " 条";
+    $("list-body").innerHTML = data.items.map(r => {
+      const d = r.delegation;
+      return `<tr class="clickable${current && current.id === r.id ? " active" : ""}" data-id="${r.id}">
+        <td>${r.id}</td><td>${r.reference}</td><td><span class="badge state">${r.state}</span></td>
+        <td>${r.jurisdiction_org || "—"}</td>
+        <td>${d ? `<span class="badge entrusted">${d.to_org}</span>` : "—"}</td><td>${r.version}</td></tr>`;
+    }).join("") || `<tr><td colspan="6" class="muted">当前分局无可见记录</td></tr>`;
+    document.querySelectorAll("#list-body tr.clickable").forEach(tr => tr.onclick = () => loadDetail(Number(tr.dataset.id)));
+  } catch (err) {
+    $("list-body").innerHTML = `<tr><td colspan="6" class="muted">${err.message}</td></tr>`;
+  }
+}
+
+async function loadDetail(id) {
+  hideConflict();
+  try {
+    current = await api("/api/records/" + id);
+    renderDetail();
+    loadTimeline(id);
+  } catch (err) {
+    current = null;
+    $("detail").style.display = "none";
+    $("detail-empty").style.display = "block";
+    $("detail-empty").textContent = "无法查看：" + err.message;
+  }
+}
+
+function renderDetail() {
+  const r = current;
+  $("detail-empty").style.display = "none";
+  $("detail").style.display = "block";
+  const d = r.delegation;
+  $("detail-badges").innerHTML =
+    `<span class="badge state">#${r.id} ${r.reference} · ${r.state} · v${r.version}</span>` +
+    `<span class="badge jurisdiction">管辖：${r.jurisdiction_org || "未划定"}</span>` +
+    (d ? `<span class="badge entrusted">受托：${d.to_org}（${d.phases.join("/")}）</span>`
+       : `<span class="badge">当前无受托分局</span>`);
+  $("a-version").value = r.version;
+  $("a-data").value = JSON.stringify(ACTION_TEMPLATES[$("a-action").value], null, 1);
+  $("delegation-body").innerHTML = (r.delegations || []).map(g =>
+    `<tr><td>${g.from_org || "—"} → ${g.to_org}</td><td>${g.phases.join("/")}</td>
+     <td>${fmt(g.valid_from)}<br>~ ${fmt(g.valid_until)}</td>
+     <td><span class="badge ${g.status === "active" ? "entrusted" : "closed"}">${g.status}</span></td>
+     <td>${g.reason || "—"}<br><span class="muted">${g.closed_by ? g.closed_by + " · " + fmt(g.closed_at) : g.created_by + " 发起"}</span></td></tr>`
+  ).join("") || `<tr><td colspan="5" class="muted">尚无交接</td></tr>`;
+  $("detail-payload").textContent = JSON.stringify(r.payload, null, 2);
+}
+
+async function loadTimeline(id) {
+  try {
+    const data = await api(`/api/records/${id}/audit`);
+    $("timeline").innerHTML = data.items.map(e =>
+      `<li><code>${e.action}</code> ${e.actor_id} · v${e.version} · ${fmt(e.created_at)}<br><span class="muted">${JSON.stringify(e.details)}</span></li>`
+    ).join("");
+  } catch (err) {
+    $("timeline").innerHTML = `<li class="muted">${err.message}</li>`;
+  }
+}
+
+function showConflict(err) {
+  const d = err.details || {};
+  $("cf-message").textContent = err.message;
+  $("cf-version").textContent = d.current_version ?? "—";
+  $("cf-state").textContent = d.current_state ?? "—";
+  $("cf-jurisdiction").textContent = d.jurisdiction_org || "—";
+  $("cf-entrusted").textContent = d.entrusted_org ? `${d.entrusted_org}（${(d.entrusted_phases || []).join("/")}）` : "无";
+  const ca = d.conflicting_action;
+  $("cf-action").textContent = ca ? `${ca.action} · ${ca.actor_id} · ${ca.org || "未知分局"} · ${fmt(ca.at)}` : "—";
+  $("conflict-box").classList.add("show");
+}
+function hideConflict() { $("conflict-box").classList.remove("show"); }
+
+async function runAction(action, data) {
+  hideConflict();
+  const version = Number($("a-version").value);
+  try {
+    current = await api(`/api/records/${current.id}/actions/${action}`, {
+      method: "POST", body: JSON.stringify({expected_version: version, data})
+    });
+    toast($("act-msg"), true, `${action} 成功，当前版本 v${current.version}`);
+    renderDetail();
+    loadTimeline(current.id);
+    loadList();
+  } catch (err) {
+    toast($("act-msg"), false, `${action} 失败：${err.message}`);
+    if (err.details && err.details.current_version !== undefined) showConflict(err);
+  }
+}
+
+$("btn-create").onclick = async () => {
+  const payload = {
+    reference: $("c-reference").value.trim(),
+    data: {
+      cable: $("c-cable").value, segment: $("c-segment").value,
+      jurisdiction_org: $("c-jurisdiction").value.trim() || $("f-org").value,
+      start_km: Number($("c-start").value), end_km: Number($("c-end").value),
+      depth_m: Number($("c-depth").value), sea_state: Number($("c-sea").value),
+      vessel_available: $("c-vessel").checked, spare_length_km: Number($("c-spare").value),
+      permit_valid: $("c-permit").checked, capacity_gbps: Number($("c-capacity").value)
+    }
+  };
+  try {
+    const record = await api("/api/records", {method: "POST", body: JSON.stringify(payload)});
+    toast($("create-msg"), true, `已创建 #${record.id}，管辖分局：${record.jurisdiction_org || "未划定"}`);
+    loadList();
+  } catch (err) {
+    toast($("create-msg"), false, "创建失败：" + err.message);
+  }
+};
+$("btn-refresh").onclick = loadList;
+$("a-action").onchange = () => { $("a-data").value = JSON.stringify(ACTION_TEMPLATES[$("a-action").value], null, 1); };
+$("btn-act").onclick = () => {
+  if (!current) return;
+  let data;
+  try { data = JSON.parse($("a-data").value || "{}"); } catch (e) { toast($("act-msg"), false, "动作数据不是有效JSON"); return; }
+  runAction($("a-action").value, data);
+};
+$("btn-delegate").onclick = () => {
+  if (!current) return;
+  const phases = [...document.querySelectorAll("#d-phases input:checked")].map(i => i.value);
+  const data = {to_org: $("d-to").value, phases, reason: $("d-reason").value};
+  if ($("d-from").value) data.valid_from = toIso($("d-from").value);
+  if ($("d-until").value) data.valid_until = toIso($("d-until").value);
+  runAction("delegate", data);
+};
+$("btn-return").onclick = () => {
+  if (!current) return;
+  const reason = prompt("退回理由（将写入交接凭据）", "船机调度冲突");
+  if (reason !== null) runAction("return", {reason});
+};
+$("btn-revoke").onclick = () => {
+  if (!current) return;
+  const reason = prompt("撤回理由（上级调度凭据）", "上级统一调度");
+  if (reason !== null) runAction("revoke", {reason});
+};
+$("btn-retry").onclick = () => {
+  $("a-version").value = $("cf-version").textContent;
+  hideConflict();
+  toast($("act-msg"), true, "已填入当前版本，原始数据保留，可直接重新执行。");
+};
+document.querySelectorAll(".presets button").forEach(btn => btn.onclick = () => {
+  const [user, role, org] = btn.dataset.p.split("|");
+  $("f-user").value = user; $("f-role").value = role; $("f-org").value = org;
+  $("c-jurisdiction").value = org === "总部" ? "" : org;
+  current = null;
+  $("detail").style.display = "none";
+  $("detail-empty").style.display = "block";
+  loadList();
+});
+["f-user", "f-role", "f-org"].forEach(id => $(id).onchange = loadList);
+
+$("c-jurisdiction").value = $("f-org").value;
+setLocal("d-from", new Date());
+setLocal("d-until", new Date(Date.now() + 8 * 3600 * 1000));
+loadList();
 </script>
 </body>
 </html>
