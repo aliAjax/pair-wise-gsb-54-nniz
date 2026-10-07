@@ -1,11 +1,16 @@
 """领域基础类型与输入校验。"""
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
 
 class DomainError(Exception):
     status = 400
     code = "domain_error"
+
+    def __init__(self, message: str = "", details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message)
+        self.details = dict(details or {})
 
 
 class ValidationError(DomainError):
@@ -95,3 +100,31 @@ def text_list(data: Dict[str, Any], key: str, minimum: int = 0) -> List[str]:
     if len(value) < minimum:
         raise ValidationError("%s至少需要%s项" % (key, minimum))
     return [item.strip() for item in value]
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def iso_now() -> str:
+    return utc_now().replace(microsecond=0).isoformat()
+
+
+def iso_time(data: Dict[str, Any], key: str) -> str:
+    """读取并归一化 ISO-8601 时间字符串，返回 UTC 文本（带偏移的保留原偏移语义）。"""
+    raw = text(data, key)
+    normalized = raw.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise ValidationError("%s必须是ISO-8601时间" % key) from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def parse_iso(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)

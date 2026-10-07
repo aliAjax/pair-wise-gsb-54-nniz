@@ -6,6 +6,6 @@
   "projectForm": "完整项目",
   "codeScope": "backend, frontend",
   "languages": ["Python", "HTML", "CSS", "JavaScript"],
-  "summary": "跨海光缆故障与抢修协调服务，覆盖海况、船机许可、备缆窗口和接续质量。",
+  "summary": "跨分局抢修协同台：管辖分局建单与双向可见、按阶段带生效期委托、退回/到期/上级撤回即时失效、单分局写入与冲突凭据、按最新版本重试。",
   "containerized": false
 }

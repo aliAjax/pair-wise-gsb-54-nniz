@@ -1,13 +1,35 @@
 """跨海光缆故障与抢修协调领域规则与状态转换。"""
-from typing import Any, Dict, Iterable, Tuple
+from typing import Any, Dict, Iterable, List, Tuple
 
-from .domain import Actor, Conflict, ValidationError, boolean, choice, integer, number, text, text_list
+from .domain import Actor, Conflict, PermissionDenied, ValidationError, boolean, choice, integer, iso_time, number, text, text_list
 
 
 INITIAL_STATE = "detected"
-CREATE_ROLES = {'noc_operator'}
+CREATE_ROLES = {'noc_operator', 'repair_manager'}
 ACTION_ROLES = {'approve': {'repair_manager'}, 'mobilize': {'vessel_master'}, 'survey': {'cable_engineer'}, 'splice': {'cable_engineer'}, 'test': {'noc_operator'}, 'restore': {'noc_operator', 'repair_manager'}, 'cancel': {'repair_manager'}}
 TRANSITIONS = {'approve': {'detected': 'approved'}, 'mobilize': {'approved': 'mobilized'}, 'survey': {'mobilized': 'surveyed'}, 'splice': {'surveyed': 'spliced'}, 'test': {'spliced': 'tested'}, 'restore': {'tested': 'restored'}, 'cancel': {'detected': 'cancelled', 'approved': 'cancelled', 'mobilized': 'cancelled'}}
+
+# 抢修阶段到业务动作的映射；all 表示整段流程（抢修经理按阶段委托兄弟分局）。
+STAGE_ACTIONS: Dict[str, set] = {
+    'approve': {'approve'},
+    'mobilize': {'mobilize'},
+    'survey': {'survey'},
+    'splice': {'splice'},
+    'test': {'test'},
+    'restore': {'restore', 'cancel'},
+    'all': set(TRANSITIONS.keys()),
+}
+STAGE_LABELS: Dict[str, str] = {
+    'approve': '方案批准',
+    'mobilize': '船机动员',
+    'survey': '故障勘察',
+    'splice': '光缆接续',
+    'test': '系统测试',
+    'restore': '恢复收口',
+    'all': '全流程',
+}
+# 委托终止状态
+DELEGATION_ENDED = {'returned', 'withdrawn', 'expired'}
 
 
 class DomainRules:
@@ -24,6 +46,53 @@ class DomainRules:
 
     def role_can_action(self, role: str, action: str) -> bool:
         return role == "admin" or role in ACTION_ROLES.get(action, set())
+
+    def is_superior(self, actor: Actor) -> bool:
+        """上级（调度中心）可跨分局查看并撤回委托。"""
+        return actor.role == "admin"
+
+    def require_org(self, actor: Actor) -> str:
+        if not actor.organization.strip():
+            raise PermissionDenied("缺少所属分局（X-Org）")
+        return actor.organization.strip()
+
+    def can_view(self, actor: Actor, owner_org: str, trustee_org: str) -> bool:
+        """本分局和当前受托分局可见；上级可见全部。"""
+        org = actor.organization.strip()
+        if self.is_superior(actor):
+            return True
+        if not org:
+            return False
+        return org == owner_org or bool(trustee_org and org == trustee_org)
+
+    def writer_for(self, record: Dict[str, Any], delegation: Dict[str, Any] = None) -> str:
+        """当前唯一允许写入的分局：委托生效期内为受托分局，否则为管辖分局。"""
+        if delegation and delegation["status"] == "active":
+            return str(delegation["target_org"])
+        return str(record["owner_org"])
+
+    def authorize_write(self, actor: Actor, record: Dict[str, Any], action: str, delegation: Dict[str, Any] = None) -> None:
+        """并发办理只让一个分局写入，按委托阶段约束受托方动作范围。"""
+        org = self.require_org(actor)
+        if not self.role_can_action(actor.role, action):
+            raise PermissionDenied("角色无权执行该操作")
+        if delegation and delegation["status"] == "active":
+            stage = str(delegation["stage"])
+            if org == delegation["target_org"]:
+                if action not in STAGE_ACTIONS.get(stage, set()):
+                    raise PermissionDenied("委托阶段[%s]不含动作%s" % (STAGE_LABELS.get(stage, stage), action))
+                return
+            if org == record["owner_org"] and action in STAGE_ACTIONS.get(stage, set()):
+                # 该阶段已委托给兄弟分局：保留原记录，告知当前受托方与冲突动作
+                raise Conflict(
+                    "该阶段已委托给%s办理" % delegation["target_org"],
+                    {"reason": "stage_delegated", "writer_org": delegation["target_org"],
+                     "delegated_stage": stage, "conflict_action": action,
+                     "delegation_id": delegation["id"]},
+                )
+            raise PermissionDenied("当前仅受托分局%s可写入" % delegation["target_org"])
+        if org != record["owner_org"]:
+            raise PermissionDenied("故障单归属%s分局，本分局无权办理" % record["owner_org"])
 
     def validate_create(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         p = dict(payload)
@@ -117,3 +186,37 @@ class DomainRules:
             summary = "抢修取消"
         p.update(changes)
         return new_state, p, summary or ("已执行%s" % action)
+
+    # ---- 跨分局委托规则 ----
+
+    def stages(self) -> List[Dict[str, str]]:
+        return [{"stage": stage, "label": STAGE_LABELS[stage]} for stage in STAGE_ACTIONS if stage != "all"] + [
+            {"stage": "all", "label": STAGE_LABELS["all"]}
+        ]
+
+    def validate_delegation(self, record: Dict[str, Any], data: Dict[str, Any], actor: Actor, now_iso: str) -> Dict[str, Any]:
+        """抢修经理按阶段委托兄弟分局并设生效期。"""
+        owner = str(record["owner_org"])
+        org = self.require_org(actor)
+        if not self.is_superior(actor):
+            if actor.role != "repair_manager":
+                raise PermissionDenied("仅抢修经理可发起委托")
+            if org != owner:
+                raise PermissionDenied("仅管辖分局可委托本单")
+        target = text(data, "target_org")
+        if target == owner:
+            raise PermissionDenied("受托分局必须是兄弟分局，不能与管辖分局相同")
+        stage = choice(data, "stage", list(STAGE_ACTIONS.keys()))
+        valid_from = iso_time(data, "valid_from") if data.get("valid_from") else now_iso
+        valid_until = iso_time(data, "valid_until")
+        if valid_until <= valid_from:
+            raise ValidationError("生效截止必须晚于生效时间")
+        reason = text(data, "reason")
+        return {"target_org": target, "stage": stage, "valid_from": valid_from,
+                "valid_until": valid_until, "reason": reason}
+
+    def delegation_effective(self, delegation: Dict[str, Any], now_dt) -> bool:
+        from .domain import parse_iso
+        if delegation["status"] != "active":
+            return False
+        return parse_iso(delegation["valid_from"]) <= now_dt < parse_iso(delegation["valid_until"])

@@ -1,33 +1,366 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>跨海光缆故障与抢修协调</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; color: #17212b; }
-    main { max-width: 960px; margin: auto; }
-    button { padding: .55rem .9rem; cursor: pointer; }
-    pre { background: #f4f6f8; padding: 1rem; overflow: auto; border-radius: 8px; }
-    .row { display: flex; gap: 1rem; align-items: center; }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>跨分局抢修协同台</title>
+<style>
+  :root { --line:#d7dde4; --bg:#f3f5f8; --ink:#17212b; --muted:#667482; --brand:#0b5fff; --warn:#c23b3b; --ok:#1d7a44; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; margin:0; background:var(--bg); color:var(--ink); }
+  header { background:#0d1b2a; color:#fff; padding:.8rem 1.2rem; display:flex; gap:1rem; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:1.05rem; margin:0; margin-right:auto; }
+  header label { font-size:.8rem; color:#aebccb; display:flex; flex-direction:column; gap:.25rem; }
+  header select, header input { padding:.35rem .5rem; border-radius:6px; border:1px solid #2a3b4e; background:#16263a; color:#fff; min-width:9rem; }
+  main { max-width:1180px; margin:1.2rem auto; padding:0 1rem; display:grid; grid-template-columns:340px 1fr; gap:1rem; align-items:start; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:1rem; }
+  .card h2 { font-size:.95rem; margin:0 0 .7rem; }
+  button { padding:.5rem .85rem; border:0; border-radius:7px; background:var(--brand); color:#fff; cursor:pointer; font-size:.85rem; }
+  button.ghost { background:#eef2f7; color:var(--ink); border:1px solid var(--line); }
+  button.danger { background:var(--warn); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  input,select,textarea { width:100%; padding:.45rem .55rem; border:1px solid var(--line); border-radius:6px; font-size:.85rem; font-family:inherit; }
+  label.fld { display:block; font-size:.78rem; color:var(--muted); margin:.5rem 0; }
+  label.fld input,label.fld select,label.fld textarea { margin-top:.2rem; }
+  .row { display:flex; gap:.5rem; align-items:center; }
+  .muted { color:var(--muted); font-size:.8rem; }
+  .ticket { border:1px solid var(--line); border-radius:8px; padding:.6rem .7rem; margin-bottom:.5rem; cursor:pointer; }
+  .ticket:hover { border-color:var(--brand); }
+  .ticket.active { border-color:var(--brand); box-shadow:0 0 0 2px rgba(11,95,255,.15); }
+  .ticket .ref { font-weight:600; }
+  .badges { display:flex; gap:.35rem; flex-wrap:wrap; margin-top:.35rem; }
+  .badge { font-size:.72rem; padding:.12rem .5rem; border-radius:99px; background:#eef2f7; color:#33424f; }
+  .badge.owner { background:#e7f0ff; color:#0b4fc9; }
+  .badge.trustee { background:#fff2df; color:#9a5a00; }
+  .badge.state { background:#e8f6ee; color:var(--ok); }
+  .badge.locked { background:#fdeaea; color:var(--warn); }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:.6rem; }
+  .section { border-top:1px dashed var(--line); margin-top:.8rem; padding-top:.7rem; }
+  .timeline li { list-style:none; padding:.45rem .6rem; border-left:3px solid var(--line); margin-bottom:.35rem; font-size:.82rem; background:#fafbfc; border-radius:0 6px 6px 0; }
+  .timeline { padding:0; margin:0; }
+  .timeline .grant { border-left-color:#d98a00; }
+  .timeline .return { border-left-color:var(--ok); }
+  .timeline .withdraw { border-left-color:#6d3fc9; }
+  .timeline .expired { border-left-color:#8a949f; }
+  .timeline .conflict { border-left-color:var(--warn); background:#fdf3f3; }
+  .alert { padding:.6rem .8rem; border-radius:8px; font-size:.83rem; margin:.5rem 0; display:none; }
+  .alert.error { display:block; background:#fdeaea; color:#8f2020; border:1px solid #f0c4c4; }
+  .alert.ok { display:block; background:#e8f6ee; color:var(--ok); border:1px solid #bfe3cf; }
+  pre { background:#0e1a27; color:#cdd9e5; padding:.7rem; border-radius:8px; font-size:.74rem; overflow:auto; max-height:180px; }
+  .kv { display:grid; grid-template-columns:6.5rem 1fr; gap:.25rem .6rem; font-size:.83rem; }
+  .kv .k { color:var(--muted); }
+  .smallbtn { padding:.25rem .55rem; font-size:.75rem; }
+  #stagesBox { display:flex; flex-wrap:wrap; gap:.3rem; }
+  .stagepick { padding:.3rem .6rem; border-radius:99px; border:1px solid var(--line); background:#fff; font-size:.76rem; cursor:pointer; }
+  .stagepick.on { background:var(--brand); color:#fff; border-color:var(--brand); }
+</style>
 </head>
 <body>
+<header>
+  <h1>跨分局抢修协同台</h1>
+  <label>身份
+    <select id="preset"></select>
+  </label>
+  <label>用户ID<input id="uid"></label>
+  <label>角色
+    <select id="role">
+      <option value="noc_operator">值班登记员</option>
+      <option value="repair_manager">抢修经理</option>
+      <option value="vessel_master">船机长</option>
+      <option value="cable_engineer">光缆工程师</option>
+      <option value="admin">上级调度</option>
+    </select>
+  </label>
+  <label>分局<input id="org" placeholder="如 JIA / YI"></label>
+</header>
 <main>
-  <h1>跨海光缆故障与抢修协调</h1>
-  <p>最小演示页。完整业务流程通过README中的JSON接口调用。</p>
-  <div class="row"><button id="load">加载记录</button><button id="stats">查看状态统计</button></div>
-  <pre id="output">点击上方按钮读取服务状态。</pre>
+  <div>
+    <div class="card">
+      <h2>登记故障（写明管辖分局）</h2>
+      <label class="fld">故障单号<input id="cRef" placeholder="CABLE-20261007-01"></label>
+      <div class="grid2">
+        <label class="fld">光缆<input id="cCable" value="SEA-1"></label>
+        <label class="fld">区段<input id="cSegment" value="S1"></label>
+        <label class="fld">起里程 km<input id="cStart" type="number" value="10" step="0.1"></label>
+        <label class="fld">止里程 km<input id="cEnd" type="number" value="20" step="0.1"></label>
+        <label class="fld">水深 m<input id="cDepth" type="number" value="600"></label>
+        <label class="fld">海况 0-9<input id="cSea" type="number" value="3" min="0" max="9"></label>
+        <label class="fld">备缆 km<input id="cSpare" type="number" value="20"></label>
+        <label class="fld">容量 Gbps<input id="cCap" type="number" value="100"></label>
+      </div>
+      <label class="fld row"><input id="cVessel" type="checkbox" style="width:auto" checked> 船机可用</label>
+      <label class="fld row"><input id="cPermit" type="checkbox" style="width:auto" checked> 许可有效</label>
+      <button id="btnCreate">登记到本分局名下</button>
+      <div id="createMsg" class="alert"></div>
+    </div>
+    <div class="card" style="margin-top:1rem">
+      <div class="row" style="justify-content:space-between">
+        <h2 style="margin:0">本分局 / 受托工单</h2>
+        <button class="ghost smallbtn" id="btnReload">刷新</button>
+      </div>
+      <div id="ticketList" class="muted" style="margin-top:.5rem">加载中…</div>
+    </div>
+  </div>
+
+  <div class="card" id="detailCard">
+    <h2>工单详情</h2>
+    <div id="emptyTip" class="muted">从左侧选择一张工单，查看管辖、受托与交接。</div>
+    <div id="detail" style="display:none">
+      <div class="row" style="justify-content:space-between;align-items:flex-start">
+        <div>
+          <div style="font-size:1.1rem;font-weight:600" id="dRef"></div>
+          <div class="badges" id="dBadges"></div>
+        </div>
+        <div class="muted" id="dMeta"></div>
+      </div>
+      <div id="actionAlert" class="alert"></div>
+
+      <div class="section">
+        <h2>管辖与受托</h2>
+        <div class="kv" id="dScope"></div>
+      </div>
+
+      <div class="section" id="delegateBox">
+        <h2>按阶段委托兄弟分局（抢修经理）</h2>
+        <label class="fld">受托分局<input id="dgOrg" placeholder="如 YI"></label>
+        <label class="fld">委托阶段
+          <div id="stagesBox" style="margin-top:.3rem"></div>
+          <input type="hidden" id="dgStage" value="approve">
+        </label>
+        <div class="grid2">
+          <label class="fld">生效时间<input id="dgFrom" type="datetime-local"></label>
+          <label class="fld">生效截止<input id="dgUntil" type="datetime-local"></label>
+        </div>
+        <label class="fld">委托凭据（事由）<textarea id="dgReason" rows="2" placeholder="例如：乙分局就近支援，需带 CS-Y 轮">乙分局就近支援</textarea></label>
+        <button id="btnGrant">发起委托</button>
+        <span style="margin-left:.5rem">
+          <button class="danger" id="btnReturn">受托方退回</button>
+          <button class="ghost" id="btnWithdraw">上级撤回</button>
+        </span>
+        <label class="fld" id="endReasonWrap" style="display:none">退回/撤回理由<input id="endReason" value="调度调整"></label>
+      </div>
+
+      <div class="section">
+        <h2>办理动作（当前仅写入分局可提交）</h2>
+        <div class="row">
+          <select id="actName">
+            <option value="approve">approve 方案批准</option>
+            <option value="mobilize">mobilize 船机动员</option>
+            <option value="survey">survey 故障勘察</option>
+            <option value="splice">splice 光缆接续</option>
+            <option value="test">test 系统测试</option>
+            <option value="restore">restore 恢复收口</option>
+            <option value="cancel">cancel 取消</option>
+          </select>
+          <button id="btnAct">提交动作</button>
+        </div>
+        <label class="fld">动作数据 JSON<textarea id="actData" rows="4"></textarea></label>
+        <div class="muted">版本号自动使用当前版本；冲突后可用“按最新版本重试”。</div>
+      </div>
+
+      <div class="section">
+        <h2>交接时间线（管辖 / 受托 / 冲突）</h2>
+        <ul class="timeline" id="dHandovers"></ul>
+      </div>
+    </div>
+  </div>
 </main>
 <script>
-const headers = {"X-User-Id":"demo-admin","X-Role":"admin","X-Org":"demo"};
-async function show(path) {
-  const response = await fetch(path, {headers});
-  const data = await response.json();
-  document.getElementById("output").textContent = JSON.stringify(data, null, 2);
+const PRESETS = [
+  {name:"甲分局·抢修经理", uid:"jia-rm", role:"repair_manager", org:"JIA"},
+  {name:"甲分局·登记员", uid:"jia-noc", role:"noc_operator", org:"JIA"},
+  {name:"甲分局·船机长", uid:"jia-vm", role:"vessel_master", org:"JIA"},
+  {name:"乙分局·抢修经理", uid:"yi-rm", role:"repair_manager", org:"YI"},
+  {name:"乙分局·船机长", uid:"yi-vm", role:"vessel_master", org:"YI"},
+  {name:"丙分局·登记员", uid:"bing-noc", role:"noc_operator", org:"BING"},
+  {name:"上级调度", uid:"dispatch", role:"admin", org:"HQ"},
+];
+const ACT_DATA = {
+  approve:{repair_manager:"RM-1"},
+  mobilize:{weather_window_hours:40, available_spare_km:18, vessel_name:"CS-1"},
+  survey:{survey_complete:true, fault_location_km:15},
+  splice:{splice_loss_db:0.12, spare_used_km:11},
+  test:{end_to_end_loss_db:0.3},
+  restore:{traffic_restored:true, restore_capacity_gbps:100},
+  cancel:{cancel_reason:"重复故障单"}
+};
+let tickets = [], current = null;
+
+const $ = id => document.getElementById(id);
+function headers() {
+  return {"X-User-Id":$("uid").value.trim(), "X-Role":$("role").value, "X-Org":$("org").value.trim(),
+          "Content-Type":"application/json"};
 }
-document.getElementById("load").onclick = () => show("/api/records?limit=20");
-document.getElementById("stats").onclick = () => show("/api/stats");
+function esc(s){ return String(s??"").replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+function initPresets(){
+  $("preset").innerHTML = PRESETS.map((p,i)=>`<option value="${i}">${p.name}</option>`).join("");
+  $("preset").onchange = e => { const p=PRESETS[e.target.value]; $("uid").value=p.uid; $("role").value=p.role; $("org").value=p.org; loadTickets(); };
+  const p=PRESETS[0]; $("uid").value=p.uid; $("role").value=p.role; $("org").value=p.org;
+  ["uid","role","org"].forEach(id=>$(id).addEventListener("change",loadTickets));
+}
+function localInput(el, iso){ const d = new Date(iso||Date.now()); el.value = new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16); }
+function isoLocal(value){ return new Date(value).toISOString(); }
+
+async function api(path, opts={}){
+  const res = await fetch(path, Object.assign({headers:headers()}, opts));
+  const data = await res.json().catch(()=>({}));
+  if(!res.ok){ const err = new Error(data.message||("HTTP "+res.status)); err.status=res.status; err.payload=data; throw err; }
+  return data;
+}
+function showAlert(el, msg, ok){ el.className = "alert "+(ok?"ok":"error"); el.textContent = msg; }
+function clearAlert(el){ el.className="alert"; el.textContent=""; }
+
+async function loadTickets(){
+  try{
+    const d = await api("/api/records?limit=100");
+    tickets = d.items;
+    $("ticketList").innerHTML = tickets.length ? tickets.map(t=>`
+      <div class="ticket ${current&&current.id===t.id?'active':''}" data-id="${t.id}">
+        <div class="ref">${esc(t.reference)}</div>
+        <div class="muted">${esc(t.payload.cable)} / ${esc(t.payload.segment)} · v${t.version}</div>
+        <div class="badges">
+          <span class="badge state">${esc(t.state)}</span>
+          <span class="badge owner">管辖 ${esc(t.owner_org)}</span>
+          ${t.trustee_org?`<span class="badge trustee">受托 ${esc(t.trustee_org)}</span>`:""}
+          ${t.trustee_org?`<span class="badge locked">写入 ${esc(t.writer_org)}</span>`:""}
+        </div>
+      </div>`).join("") : '<div class="muted">没有可看见的工单（仅本分局与当前受托分局可见）。</div>';
+    document.querySelectorAll(".ticket").forEach(el=>el.onclick=()=>openTicket(+el.dataset.id));
+  }catch(e){ $("ticketList").innerHTML = `<div class="alert error">${esc(e.message)}</div>`; }
+}
+
+async function openTicket(id){
+  clearAlert($("actionAlert"));
+  try{
+    current = await api("/api/records/"+id);
+    renderDetail();
+    loadTickets();
+  }catch(e){
+    $("emptyTip").style.display="block"; $("detail").style.display="none";
+    $("emptyTip").innerHTML = `<span class="alert error">${esc(e.message)}</span>`;
+  }
+}
+
+function renderStages(stages){
+  $("stagesBox").innerHTML = stages.map(s=>`<button type="button" class="stagepick" data-stage="${s.stage}">${esc(s.label)}</button>`).join("");
+  document.querySelectorAll(".stagepick").forEach(b=>{
+    b.onclick=()=>{ document.querySelectorAll(".stagepick").forEach(x=>x.classList.remove("on")); b.classList.add("on"); $("dgStage").value=b.dataset.stage; };
+  });
+  const def = document.querySelector('.stagepick[data-stage="approve"]'); if(def) def.classList.add("on");
+}
+
+function renderDetail(){
+  $("emptyTip").style.display="none"; $("detail").style.display="block";
+  $("dRef").textContent = current.reference;
+  const badges = [`<span class="badge state">${esc(current.state)}</span>`,
+                  `<span class="badge owner">管辖分局 ${esc(current.owner_org)}</span>`];
+  if(current.trustee_org){ badges.push(`<span class="badge trustee">当前受托 ${esc(current.trustee_org)}</span>`);
+    badges.push(`<span class="badge locked">唯一写入 ${esc(current.writer_org)}</span>`); }
+  else { badges.push(`<span class="badge">写入回归 ${esc(current.writer_org)}</span>`); }
+  $("dBadges").innerHTML = badges.join("");
+  $("dMeta").textContent = `v${current.version} · ${current.updated_at}`;
+  const cd = current.current_delegation;
+  $("dScope").innerHTML = `
+    <div class="k">管辖分局</div><div>${esc(current.owner_org)}</div>
+    <div class="k">当前受托</div><div>${cd ? esc(cd.target_org)+"（"+esc(cd.stage_label)+"，"+(cd.effective?"生效中":"未生效")+"）" : "无"}</div>
+    <div class="k">生效期</div><div>${cd ? esc(cd.valid_from)+" → "+esc(cd.valid_until) : "—"}</div>
+    <div class="k">写入分局</div><div><b>${esc(current.writer_org)}</b></div>`;
+  // 委托表单默认值
+  localInput($("dgFrom"));
+  const until = new Date(); until.setHours(until.getHours()+24); localInput($("dgUntil"), until.toISOString());
+  api("/api/stages").then(renderStages).catch(()=>{});
+  // 交接 + 冲突
+  const events = (current.handovers||[]).map(h=>{
+    const cls = h.action.replace("delegation_","");
+    const d = h.details||{};
+    const txt = {
+      delegation_granted:`委托给 <b>${esc(d.target_org)}</b> · ${esc(d.stage_label||d.stage)} · ${esc(d.reason||"")}<br><span class="muted">${esc(d.valid_from)} ~ ${esc(d.valid_until)}</span>`,
+      delegation_returned:`受托方 <b>${esc(d.target_org)}</b> 退回 · ${esc(d.reason||"")}`,
+      delegation_withdrawn:`上级撤回 <b>${esc(d.target_org)}</b> 的委托 · ${esc(d.reason||"")}`,
+      delegation_expired:`委托到期自动失效（原受托 <b>${esc(d.target_org)}</b>）`
+    }[h.action]||"";
+    return `<li class="${cls}"><b>${esc({grant:"发起委托",return:"受托退回",withdrawn:"上级撤回",expired:"到期失效"}[cls]||h.action)}</b> · ${esc(h.actor_id)}@${esc(h.actor_org)} · v${h.version}<br>${txt}<div class="muted">${esc(h.created_at)}</div></li>`;
+  });
+  const conflicts = (current.conflicts||[]).map(c=>{
+    const d=c.details||{};
+    return `<li class="conflict"><b>换手失败（保留原记录）</b> · ${esc(c.actor_id)}@${esc(c.actor_org)} 尝试 <b>${esc(d.attempted_action)}</b><br>
+      唯一写入分局：<b>${esc(d.writer_org)}</b>；先成动作：${esc(d.winning_action)}（${esc(d.winning_actor)}）<br>
+      <span class="muted">所持版本 v${d.expected_version??"?"} → 最新版本 v${d.current_version}；可按最新版本重试。</span>
+      <div style="margin-top:.3rem"><button class="smallbtn ghost" onclick="retryConflict('${esc(d.attempted_action)}', ${d.current_version})">用最新版本重试该动作</button></div>
+      <div class="muted">${esc(c.created_at)}</div></li>`;
+  });
+  $("dHandovers").innerHTML = (conflicts.join("") + events.join("")) || '<li class="muted">暂无交接。</li>';
+}
+
+window.retryConflict = function(action, version){
+  $("actName").value = action;
+  $("actData").value = JSON.stringify(ACT_DATA[action]||{}, null, 2);
+  submitAction(version);
+};
+
+async function submitAction(useVersion){
+  const id = current.id, version = useVersion ?? current.version;
+  let data;
+  try{ data = JSON.parse($("actData").value||"{}"); }
+  catch(e){ return showAlert($("actionAlert"),"动作数据不是合法JSON"); }
+  try{
+    current = await api(`/api/records/${id}/actions/${$("actName").value}`,
+      {method:"POST", body:JSON.stringify({expected_version:version, data})});
+    showAlert($("actionAlert"),"动作成功，新版本 v"+current.version, true);
+    renderDetail(); loadTickets();
+  }catch(e){
+    const d = e.payload?.details||{};
+    let msg = e.message;
+    if(e.status===409){
+      msg += `；唯一写入分局=${d.writer_org||"?"}，冲突动作=${esc(d.conflict_action||d.attempted_action||"")}，先成动作=${esc(d.winning_action||"")}。请用最新版本 v${d.current_version} 重试（下方“换手失败”栏可见凭据）。`;
+    }
+    showAlert($("actionAlert"), msg);
+    openTicket(id);
+  }
+}
+
+async function grant(){
+  const payload = {expected_version:current.version, data:{
+    target_org:$("dgOrg").value.trim(), stage:$("dgStage").value,
+    valid_from:isoLocal($("dgFrom").value), valid_until:isoLocal($("dgUntil").value),
+    reason:$("dgReason").value.trim()}};
+  try{ current = await api(`/api/records/${current.id}/delegations/grant`,{method:"POST",body:JSON.stringify(payload)});
+    showAlert($("actionAlert"),"委托已发起",true); renderDetail(); loadTickets();
+  }catch(e){ showAlert($("actionAlert"),e.message); openTicket(current.id); }
+}
+async function endDelegation(op){
+  const payload = {expected_version:current.version, data:{reason:$("endReason").value.trim()}};
+  try{ const r = await api(`/api/records/${current.id}/delegations/${op}`,{method:"POST",body:JSON.stringify(payload)});
+    showAlert($("actionAlert"), op==="return" ? "已退回，委托立即失效（回执 v"+r.version+"）" : "上级已撤回，委托立即失效", true);
+    current=null; await loadTickets();
+    $("detail").style.display="none"; $("emptyTip").style.display="block"; $("emptyTip").textContent="交接完成，详情已刷新（退回后受托分局不再可见该工单）。";
+  }catch(e){ showAlert($("actionAlert"),e.message); openTicket(current.id); }
+}
+
+async function createTicket(){
+  const payload = {reference:$("cRef").value.trim(), data:{
+    cable:$("cCable").value.trim(), segment:$("cSegment").value.trim(),
+    start_km:+$("cStart").value, end_km:+$("cEnd").value, depth_m:+$("cDepth").value,
+    sea_state:+$("cSea").value, vessel_available:$("cVessel").checked,
+    spare_length_km:+$("cSpare").value, permit_valid:$("cPermit").checked, capacity_gbps:+$("cCap").value}};
+  try{ const r = await api("/api/records",{method:"POST",body:JSON.stringify(payload)});
+    showAlert($("createMsg"),`已登记：${r.reference}，管辖分局 ${r.owner_org}`,true); loadTickets();
+  }catch(e){ showAlert($("createMsg"),e.message); }
+}
+
+$("btnCreate").onclick = createTicket;
+$("btnReload").onclick = loadTickets;
+$("btnAct").onclick = ()=>submitAction();
+$("btnGrant").onclick = grant;
+$("btnReturn").onclick = ()=>endDelegation("return");
+$("btnWithdraw").onclick = ()=>endDelegation("withdraw");
+$("actName").onchange = ()=>$("actData").value = JSON.stringify(ACT_DATA[$("actName").value]||{}, null, 2);
+$("actData").value = JSON.stringify(ACT_DATA.approve, null, 2);
+$("btnReturn").onmouseenter = $("btnWithdraw").onmouseenter = ()=>$("endReasonWrap").style.display="block";
+initPresets();
+localInput($("dgFrom")); const u=new Date(); u.setHours(u.getHours()+24); localInput($("dgUntil"),u.toISOString());
+loadTickets();
 </script>
 </body>
 </html>

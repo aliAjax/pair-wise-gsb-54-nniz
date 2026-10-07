@@ -20,15 +20,27 @@ class FailureTest(unittest.TestCase):
 
     def test_permission_and_duplicate(self):
         with self.assertRaises(PermissionDenied):
-            self.service.create(Actor("outsider", "outsider"), "CABLE-30001", CREATE_DATA)
-        self.service.create(Actor("creator", "noc_operator"), "CABLE-30001", CREATE_DATA)
+            self.service.create(Actor("outsider", "outsider", "JIA"), "CABLE-30001", CREATE_DATA)
+        self.service.create(Actor("creator", "noc_operator", "JIA"), "CABLE-30001", CREATE_DATA)
         with self.assertRaises(Conflict):
-            self.service.create(Actor("creator", "noc_operator"), "CABLE-30001", CREATE_DATA)
+            self.service.create(Actor("creator", "noc_operator", "JIA"), "CABLE-30001", CREATE_DATA)
 
     def test_stale_version_is_rejected(self):
-        record = self.service.create(Actor("creator", "noc_operator"), "CABLE-30001", CREATE_DATA)
+        record = self.service.create(Actor("creator", "noc_operator", "JIA"), "CABLE-30001", CREATE_DATA)
         first = FLOW[0]
-        record = self.service.act(Actor("operator", first[1]), record["id"], record["version"], first[0], first[2])
+        record = self.service.act(Actor("operator", first[1], "JIA"), record["id"], record["version"], first[0], first[2])
         second = FLOW[1]
         with self.assertRaises(Conflict):
-            self.service.act(Actor("operator", second[1]), record["id"], record["version"] - 1, second[0], second[2])
+            self.service.act(Actor("operator", second[1], "JIA"), record["id"], record["version"] - 1, second[0], second[2])
+
+    def test_other_branch_cannot_write(self):
+        record = self.service.create(Actor("creator", "noc_operator", "JIA"), "CABLE-30001", CREATE_DATA)
+        with self.assertRaises(PermissionDenied):
+            self.service.act(Actor("yi-rm", "repair_manager", "YI"), record["id"], record["version"],
+                             "approve", {"repair_manager": "RM-Y"})
+
+    def test_other_branch_cannot_view(self):
+        record = self.service.create(Actor("creator", "noc_operator", "JIA"), "CABLE-30001", CREATE_DATA)
+        with self.assertRaises(PermissionDenied):
+            self.service.get_record(Actor("yi-op", "noc_operator", "YI"), record["id"])
+        self.assertEqual([], self.service.list_records(Actor("yi-op", "noc_operator", "YI")))

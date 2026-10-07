@@ -12,11 +12,12 @@ from .domain import Actor, DomainError, PermissionDenied, ValidationError
 RECORD_RE = re.compile(r"^/api/records/(\d+)$")
 ACTION_RE = re.compile(r"^/api/records/(\d+)/actions/([a-z_]+)$")
 AUDIT_RE = re.compile(r"^/api/records/(\d+)/audit$")
+DELEGATE_RE = re.compile(r"^/api/records/(\d+)/delegations/(grant|return|withdraw)$")
 
 
 def make_handler(service: Any, static_dir: Path):
     class Handler(BaseHTTPRequestHandler):
-        server_version = "subsea-cable-repair/1.0"
+        server_version = "cross-branch-repair/1.0"
 
         def log_message(self, fmt: str, *args: Any) -> None:
             return
@@ -26,7 +27,7 @@ def make_handler(service: Any, static_dir: Path):
             role = self.headers.get("X-Role", "").strip()
             if not user_id or not role:
                 raise PermissionDenied("缺少X-User-Id或X-Role")
-            return Actor(user_id=user_id, role=role, organization=self.headers.get("X-Org", ""))
+            return Actor(user_id=user_id, role=role, organization=self.headers.get("X-Org", "").strip())
 
         def _body(self) -> Dict[str, Any]:
             try:
@@ -44,6 +45,12 @@ def make_handler(service: Any, static_dir: Path):
                 raise ValidationError("JSON顶层必须是对象")
             return data
 
+        def _version(self, body: Dict[str, Any]) -> int:
+            version = body.get("expected_version")
+            if not isinstance(version, int):
+                raise ValidationError("expected_version必须是整数")
+            return version
+
         def _send(self, status: int, payload: Any, content_type: str = "application/json; charset=utf-8") -> None:
             if content_type.startswith("application/json"):
                 body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -57,7 +64,10 @@ def make_handler(service: Any, static_dir: Path):
 
         def _handle_error(self, exc: Exception) -> None:
             if isinstance(exc, DomainError):
-                self._send(exc.status, {"error": exc.code, "message": str(exc)})
+                payload = {"error": exc.code, "message": str(exc)}
+                if getattr(exc, "details", None):
+                    payload["details"] = exc.details
+                self._send(exc.status, payload)
             else:
                 self._send(500, {"error": "internal_error", "message": "服务内部错误"})
 
@@ -65,7 +75,7 @@ def make_handler(service: Any, static_dir: Path):
             try:
                 parsed = urlparse(self.path)
                 if parsed.path == "/health":
-                    self._send(200, {"status": "ok", "service": "subsea-cable-repair", "database": service.repository.health()})
+                    self._send(200, {"status": "ok", "service": "cross-branch-repair", "database": service.repository.health()})
                     return
                 if parsed.path == "/":
                     page = (static_dir / "index.html").read_bytes()
@@ -75,6 +85,9 @@ def make_handler(service: Any, static_dir: Path):
                     query = parse_qs(parsed.query)
                     records = service.list_records(self._actor(), state=query.get("state", [None])[0], limit=int(query.get("limit", ["100"])[0]))
                     self._send(200, {"items": records})
+                    return
+                if parsed.path == "/api/stages":
+                    self._send(200, {"items": service.stages(self._actor())})
                     return
                 match = RECORD_RE.match(parsed.path)
                 if match:
@@ -99,12 +112,23 @@ def make_handler(service: Any, static_dir: Path):
                     record = service.create(self._actor(), body.get("reference", ""), body.get("data", {}))
                     self._send(201, record)
                     return
+                match = DELEGATE_RE.match(parsed.path)
+                if match:
+                    record_id = int(match.group(1))
+                    operation = match.group(2)
+                    version = self._version(body)
+                    if operation == "grant":
+                        record = service.grant_delegation(self._actor(), record_id, version, body.get("data", {}))
+                    elif operation == "return":
+                        record = service.return_delegation(self._actor(), record_id, version, body.get("data", {}))
+                    else:
+                        record = service.withdraw_delegation(self._actor(), record_id, version, body.get("data", {}))
+                    self._send(200, record)
+                    return
                 match = ACTION_RE.match(parsed.path)
                 if match:
-                    version = body.get("expected_version")
-                    if not isinstance(version, int):
-                        raise ValidationError("expected_version必须是整数")
-                    record = service.act(self._actor(), int(match.group(1)), version, match.group(2), body.get("data", {}))
+                    record = service.act(self._actor(), int(match.group(1)), self._version(body),
+                                         match.group(2), body.get("data", {}))
                     self._send(200, record)
                     return
                 self._send(404, {"error": "not_found", "message": "路径不存在"})

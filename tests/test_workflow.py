@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 from app import build_service
-from src.domain import Actor, Conflict
+from src.domain import Actor
 
 
 CREATE_DATA = {'cable': 'SEA-1', 'segment': 'S3', 'start_km': 120.0, 'end_km': 135.0, 'depth_m': 1800.0, 'sea_state': 3, 'vessel_available': True, 'spare_length_km': 20.0, 'permit_valid': True, 'capacity_gbps': 400}
@@ -19,11 +19,12 @@ class WorkflowTest(unittest.TestCase):
         self.temp.cleanup()
 
     def test_complete_workflow_and_audit(self):
-        record = self.service.create(Actor("creator", "noc_operator"), "CABLE-30001", CREATE_DATA)
+        record = self.service.create(Actor("creator", "noc_operator", "JIA"), "CABLE-30001", CREATE_DATA)
         self.assertEqual(record["state"], "detected")
+        self.assertEqual(record["owner_org"], "JIA")
         for action, role, data, expected_state in FLOW:
-            record = self.service.act(Actor("operator", role), record["id"], record["version"], action, data)
+            record = self.service.act(Actor("operator", role, "JIA"), record["id"], record["version"], action, data)
             self.assertEqual(record["state"], expected_state)
-        timeline = self.service.timeline(Actor("creator", "noc_operator"), record["id"])
+        timeline = self.service.timeline(Actor("creator", "noc_operator", "JIA"), record["id"])
         self.assertEqual(len(timeline), len(FLOW) + 1)
         self.assertEqual(timeline[-1]["action"], FLOW[-1][0])
